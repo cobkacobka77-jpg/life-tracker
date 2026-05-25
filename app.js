@@ -269,13 +269,15 @@ function monthOf(iso) {
 }
 
 /**
- * Given a plan { startDate, cycle: [..] } returns the cycle key for `iso`,
- * or null if iso is before the start date or the plan is unconfigured.
+ * Given a plan { startDate, cycle: [..], phaseDurationWeeks } returns the
+ * cycle key for `iso`, or null if iso is before the start date, beyond the
+ * configured phase, or the plan is unconfigured.
  */
 function splitForDate(plan, iso) {
   if (!plan || !plan.startDate || !plan.cycle || plan.cycle.length === 0) return null;
   const delta = daysBetween(plan.startDate, iso);
   if (delta < 0) return null;
+  if (plan.phaseDurationWeeks && delta >= plan.phaseDurationWeeks * 7) return null;
   const len = plan.cycle.length;
   return plan.cycle[((delta % len) + len) % len];
 }
