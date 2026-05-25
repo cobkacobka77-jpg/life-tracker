@@ -23,6 +23,7 @@ const DEFAULT_STATE = {
     workoutsPerWeek: 4,
     sleepTarget: 8,
     waterTarget: 3.0,
+    stepsTarget: 8000,
   },
   meta: {
     startDate: null,     // first day logged
@@ -1355,8 +1356,15 @@ function DailyTab({ store, showToast }) {
         <Slider label="Hunger (1–10)" value={day.hunger} onChange={(v) => update({ hunger: v })} />
       </Card>
 
-      <Card title="Hydration & Supplements">
+      <Card title="Hydration, Activity & Supplements">
         <Slider label={`Water (${day.water || 0}L)`} value={day.water || 0} onChange={(v) => update({ water: v })} min={0} max={6} step={0.25} unit="L" />
+        <div style={{ height: 14 }} />
+        <NumInput
+          label="Steps"
+          value={day.steps}
+          onChange={(v) => update({ steps: v })}
+          placeholder={String(store.state.goals.stepsTarget || 8000)}
+        />
         <div style={{ height: 14 }} />
         <label style={{ fontSize: 12, color: "var(--text-dim)", display: "block", marginBottom: 8 }}>Supplements taken</label>
         <div className="checks">
@@ -1808,6 +1816,7 @@ function StatsTab({ store }) {
   const pHits   = dayData.filter((d) => d.protein && d.protein >= goals.proteinTarget * 0.95).length;
   const sHits   = dayData.filter((d) => d.sleep && d.sleep >= goals.sleepTarget - 0.5).length;
   const wHits   = dayData.filter((d) => d.water && d.water >= goals.waterTarget).length;
+  const stepHits = dayData.filter((d) => d.steps && d.steps >= goals.stepsTarget).length;
   const logged  = dayData.filter((d) => Object.keys(d).length > 1).length;
   const expectedWorkouts = Math.max(1, (range / 7) * goals.workoutsPerWeek);
   const workoutPct = (sessionDates.length / expectedWorkouts) * 100;
@@ -1908,7 +1917,7 @@ function StatsTab({ store }) {
         <div className="stat-grid stat-grid-3">
           <Stat label="Avg stress" value={avgOf("stress") ? fmt(avgOf("stress"), 1) : "—"} unit="/10" />
           <Stat label="Avg energy" value={avgOf("energy") ? fmt(avgOf("energy"), 1) : "—"} unit="/10" />
-          <Stat label="Avg RPE" value={avgRPE ? fmt(avgRPE, 1) : "—"} />
+          <Stat label="Avg steps" value={avgOf("steps") ? fmt(avgOf("steps"), 0) : "—"} />
         </div>
       </Card>
 
@@ -1926,7 +1935,12 @@ function StatsTab({ store }) {
         <div style={{ height: 16 }} />
         <div className="stat-grid">
           <ComplianceRing value={(wHits / range) * 100} label="Water" />
+          <ComplianceRing value={(stepHits / range) * 100} label={`Steps ≥ ${fmt(goals.stepsTarget, 0)}`} />
+        </div>
+        <div style={{ height: 16 }} />
+        <div className="stat-grid">
           <ComplianceRing value={(logged / range) * 100} label="Days logged" />
+          <div />
         </div>
       </Card>
 
@@ -2034,6 +2048,18 @@ function StatsTab({ store }) {
           />
         ) : (
           <EmptyState icon="trend">No water data</EmptyState>
+        )}
+      </Card>
+
+      <Card title="Steps">
+        {dayData.some((d) => d.steps) ? (
+          <LineChart
+            labels={labels}
+            datasets={[{ label: "Steps", data: series("steps"), borderColor: "#22c55e", backgroundColor: "rgba(34,197,94,0.12)", fill: true, spanGaps: true }]}
+            yMin={0}
+          />
+        ) : (
+          <EmptyState icon="trend">No step data</EmptyState>
         )}
       </Card>
 
@@ -2147,6 +2173,10 @@ function SettingsTab({ store, showToast }) {
         <div className="settings-row">
           <label>Water (L)</label>
           <input type="number" step="0.25" value={goals.waterTarget} onChange={(e) => store.setGoals({ waterTarget: parseFloat(e.target.value) || 0 })} />
+        </div>
+        <div className="settings-row">
+          <label>Steps</label>
+          <input type="number" step="500" value={goals.stepsTarget} onChange={(e) => store.setGoals({ stepsTarget: parseInt(e.target.value) || 0 })} />
         </div>
         <div className="settings-row">
           <label>Workouts / week</label>
