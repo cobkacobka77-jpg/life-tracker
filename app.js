@@ -32,6 +32,7 @@ const DEFAULT_STATE = {
   plan: {
     startDate: "2026-05-27",        // Wed 27 May 2026 = Upper
     cycle: ["upper", "lower", "rest"],
+    phaseDurationWeeks: 4,          // length of current block before switching splits
     routines: {
       upper: {
         name: "Upper",
@@ -50,7 +51,14 @@ const DEFAULT_STATE = {
       },
       lower: {
         name: "Lower",
-        exercises: [], // fill in via Plan tab
+        exercises: [
+          { exercise: "Stretching",                 muscle: "Other" },
+          { exercise: "Squat (Barbell)",            muscle: "Quads" },
+          { exercise: "Romanian Deadlift (Barbell)", muscle: "Hamstrings" },
+          { exercise: "Standing Calf Raise (Machine)", muscle: "Calves" },
+          { exercise: "Leg Extension (Machine)",    muscle: "Quads" },
+          { exercise: "Hip Adduction (Machine)",    muscle: "Glutes" },
+        ],
       },
       rest: {
         name: "Rest",
@@ -156,6 +164,16 @@ function applySeed(state) {
     const existing = state.days[date];
     if (!existing || Object.keys(existing).length === 0) state.days[date] = day;
   });
+  // Fill in any routine that's currently empty from DEFAULT_STATE — lets us
+  // add new exercises to a routine in code and have existing users pick them up.
+  if (state.plan && state.plan.routines && DEFAULT_STATE.plan?.routines) {
+    Object.entries(DEFAULT_STATE.plan.routines).forEach(([key, def]) => {
+      const cur = state.plan.routines[key];
+      const curHas = cur && Array.isArray(cur.exercises) && cur.exercises.length > 0;
+      const defHas = def && Array.isArray(def.exercises) && def.exercises.length > 0;
+      if (!curHas && defHas) state.plan.routines[key] = structuredClone(def);
+    });
+  }
   return state;
 }
 
@@ -264,6 +282,31 @@ function splitForDate(plan, iso) {
 function weekdayShort(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short" });
+}
+
+/**
+ * Returns phase progress for a plan with phaseDurationWeeks.
+ *   { week: 1..N, totalWeeks: N, endDate: iso, daysLeft: int, complete: bool }
+ * Returns null if no start or no duration.
+ */
+function phaseInfo(plan, iso) {
+  if (!plan || !plan.startDate || !plan.phaseDurationWeeks) return null;
+  const totalWeeks = plan.phaseDurationWeeks;
+  const totalDays = totalWeeks * 7;
+  const delta = daysBetween(plan.startDate, iso);
+  const endDate = addDays(plan.startDate, totalDays - 1);
+  if (delta < 0) {
+    return { week: 0, totalWeeks, endDate, daysLeft: totalDays + (-delta), complete: false, notStarted: true };
+  }
+  const week = Math.floor(delta / 7) + 1;
+  const complete = delta >= totalDays;
+  return {
+    week: complete ? totalWeeks : week,
+    totalWeeks,
+    endDate,
+    daysLeft: Math.max(0, totalDays - delta),
+    complete,
+  };
 }
 
 /* ==========================================================================
@@ -1015,6 +1058,7 @@ function PlanTab({ store, showToast, goToWorkout }) {
   const selRoutine = selSplit ? plan.routines[selSplit] : null;
   const todaySplit = splitForDate(plan, todayIso);
   const todayRoutine = todaySplit ? plan.routines[todaySplit] : null;
+  const phase = phaseInfo(plan, todayIso);
 
   // Build "next 5 days" preview
   const nextDays = lastNDays(5, addDays(todayIso, 4)).slice(0, 5);
@@ -1045,7 +1089,14 @@ function PlanTab({ store, showToast, goToWorkout }) {
           <div className="split-banner" style={{ margin: 0, border: 0, padding: 0, background: "transparent" }}>
             <div className={"badge-lg " + todaySplit}>{todayRoutine?.name || todaySplit}</div>
             <div className="text">
-              <div className="lbl">Today</div>
+              <div className="lbl">
+                Today
+                {phase && !phase.notStarted && (
+                  <span style={{ marginLeft: 8, color: phase.complete ? "var(--warn)" : "var(--text-dim)" }}>
+                    · {phase.complete ? "Block complete" : `Week ${phase.week} of ${phase.totalWeeks}`}
+                  </span>
+                )}
+              </div>
               <div className="val">
                 {todaySplit === "rest"
                   ? "Rest day"
@@ -1058,6 +1109,11 @@ function PlanTab({ store, showToast, goToWorkout }) {
               </button>
             )}
           </div>
+          {phase && phase.complete && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "var(--warn)" }}>
+              {phase.totalWeeks}-week block finished on {formatDate(phase.endDate)} — time to review progress and switch splits.
+            </div>
+          )}
         </div>
       ) : plan.startDate && plan.startDate > todayIso ? (
         <div className="card">
@@ -1073,6 +1129,11 @@ function PlanTab({ store, showToast, goToWorkout }) {
               View
             </button>
           </div>
+          {phase && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-dim)" }}>
+              {phase.totalWeeks}-week block, ends {formatDate(phase.endDate)}.
+            </div>
+          )}
         </div>
       ) : (
         <Card title="Plan">
@@ -1190,17 +1251,32 @@ function PlanTab({ store, showToast, goToWorkout }) {
             <div className="field-hint">First day of {plan.routines[plan.cycle[0]]?.name || plan.cycle[0]}.</div>
           </div>
           <div className="field">
-            <label>Cycle</label>
+            <label>Block length (weeks)</label>
             <input
-              type="text"
-              value={plan.cycle.join(" → ")}
+              type="number"
+              inputMode="numeric"
+              value={plan.phaseDurationWeeks || ""}
               onChange={(e) => {
-                const parts = e.target.value.split(/[→,>\/\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
-                if (parts.length) store.setPlan({ cycle: parts });
+                const v = e.target.value === "" ? null : parseInt(e.target.value, 10);
+                store.setPlan({ phaseDurationWeeks: v && v > 0 ? v : null });
               }}
+              placeholder="4"
             />
-            <div className="field-hint">Order matters. Use existing routine keys.</div>
+            <div className="field-hint">Switch splits after this many weeks.</div>
           </div>
+        </div>
+        <div style={{ height: 10 }} />
+        <div className="field">
+          <label>Cycle</label>
+          <input
+            type="text"
+            value={plan.cycle.join(" → ")}
+            onChange={(e) => {
+              const parts = e.target.value.split(/[→,>\/\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+              if (parts.length) store.setPlan({ cycle: parts });
+            }}
+          />
+          <div className="field-hint">Order matters. Use existing routine keys.</div>
         </div>
       </Card>
     </div>
