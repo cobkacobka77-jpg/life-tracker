@@ -60,10 +60,109 @@ const DEFAULT_STATE = {
   },
 };
 
+/**
+ * Seed data — only applied when a given date has no workout yet. Safe to add to
+ * over time; existing logs are never overwritten. Warmup sets are excluded.
+ */
+const SEED_WORKOUTS = {
+  "2026-05-25": [
+    {
+      exercise: "Bench Press (Barbell)",
+      muscle: "Chest",
+      sets: [
+        { weight: 81.25, reps: 2, rpe: 9.5 },
+        { weight: 75,    reps: 4, rpe: 10 },
+      ],
+    },
+    {
+      exercise: "Chest Fly (Machine)",
+      muscle: "Chest",
+      sets: [{ weight: 127, reps: 6, rpe: null }],
+    },
+    {
+      exercise: "Shoulder Press (Dumbbell)",
+      muscle: "Shoulders",
+      note: "Overhead barbell",
+      sets: [
+        { weight: 26, reps: 7, rpe: null },
+        { weight: 24, reps: 5, rpe: null },
+      ],
+    },
+    {
+      exercise: "Pull Up",
+      muscle: "Back",
+      sets: [
+        { weight: 0, reps: 9, rpe: null },
+        { weight: 0, reps: 6, rpe: null },
+      ],
+    },
+    {
+      exercise: "Seated Row (Plates)",
+      muscle: "Back",
+      note: "PR — goeie vorm",
+      sets: [
+        { weight: 100, reps: 6, rpe: null },
+        { weight: 93,  reps: 6, rpe: null },
+      ],
+    },
+    {
+      exercise: "Arm Wrestle Curl",
+      muscle: "Biceps",
+      sets: [
+        { weight: 22.5, reps: 7,  rpe: null },
+        { weight: 18,   reps: 10, rpe: null },
+      ],
+    },
+    {
+      exercise: "Reverse Forearm Curl",
+      muscle: "Forearms",
+      sets: [{ weight: 12.55, reps: 7, rpe: null }],
+    },
+    {
+      exercise: "Preacher Curl (Machine)",
+      muscle: "Biceps",
+      sets: [{ weight: 59, reps: 6, rpe: null }],
+    },
+    {
+      exercise: "Hammer Curl (Cable)",
+      muscle: "Biceps",
+      sets: [
+        { weight: 35.05, reps: 6, rpe: null },
+        { weight: 31.5,  reps: 6, rpe: null },
+      ],
+    },
+    {
+      exercise: "Unilateral Tricep",
+      muscle: "Triceps",
+      sets: [
+        { weight: 12.55, reps: 6, rpe: null },
+        { weight: 11.3,  reps: 8, rpe: null },
+      ],
+    },
+  ],
+};
+
+const SEED_DAYS = {
+  // Optionally pre-populate per-day metrics (weight, sleep, etc.) here in
+  // the future. Same merge rule: only fills empty dates.
+};
+
+function applySeed(state) {
+  Object.entries(SEED_WORKOUTS).forEach(([date, ex]) => {
+    const existing = state.workouts[date];
+    if (!existing || existing.length === 0) state.workouts[date] = ex;
+  });
+  Object.entries(SEED_DAYS).forEach(([date, day]) => {
+    const existing = state.days[date];
+    if (!existing || Object.keys(existing).length === 0) state.days[date] = day;
+  });
+  return state;
+}
+
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return structuredClone(DEFAULT_STATE);
+    if (!raw) return applySeed(structuredClone(DEFAULT_STATE));
     const parsed = JSON.parse(raw);
     // shallow merge to handle schema additions
     const merged = {
@@ -82,7 +181,7 @@ function loadState() {
         ...(planSaved.routines || {}),
       },
     };
-    return merged;
+    return applySeed(merged);
   } catch (e) {
     console.warn("Failed to load state, resetting", e);
     return structuredClone(DEFAULT_STATE);
