@@ -1866,11 +1866,11 @@ function StatsTab({ store }) {
       const last = log[log.length - 1];
       const prev = log[log.length - 2];
       let suggestion;
-      if (last.top.rpe && last.top.rpe <= 7) suggestion = `+2.5 kg or +1 rep next time (RPE ${last.top.rpe})`;
-      else if (last.top.reps >= 12) suggestion = `+2.5 kg, reset to 6–8 reps`;
-      else if (prev && last.top.weight === prev.top.weight && last.top.reps === prev.top.reps) suggestion = `Stalled — try +1 rep, deload, or vary stimulus`;
-      else if (last.top.reps < 6) suggestion = `Strong load. Add 1 rep before adding weight.`;
-      else suggestion = `Add 1 rep, then +2.5 kg when reps ≥ 10`;
+      if (last.top.rpe && last.top.rpe <= 7) suggestion = `+2.5 kg next time (RPE ${last.top.rpe})`;
+      else if (last.top.reps >= 8) suggestion = `+2.5 kg next time, drop back to 6 reps`;
+      else if (prev && last.top.weight === prev.top.weight && last.top.reps === prev.top.reps) suggestion = `Stalled — try +1 rep or deload`;
+      else if (last.top.reps < 6) suggestion = `Heavy load. Get to 6 reps before adding weight.`;
+      else suggestion = `Add 1 rep, target 8`;
       hints.push({ name, last, prev, suggestion });
     });
     return hints.sort((a, b) => b.last.date.localeCompare(a.last.date)).slice(0, 6);
