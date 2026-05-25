@@ -159,6 +159,15 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 textarea { resize: vertical; min-height: 70px; font-family: inherit; }
 input[type="date"] { color-scheme: dark; }
 
+/* Kill native number-input spin buttons (the up/down arrows) */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
 /* Range slider */
 .slider-wrap { display: flex; align-items: center; gap: 12px; }
 input[type="range"] {
