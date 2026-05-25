@@ -286,6 +286,31 @@ function weekdayShort(iso) {
 }
 
 /**
+ * Simulate progression session-by-session under the current overload rules.
+ *   reps ≥ 8 → +2.5 kg, drop to 6 reps
+ *   reps < 8 → +1 rep (covers the heavy-load and 6-7 rep cases)
+ * RPE shortcut not modelled (we don't know future RPE).
+ *
+ * Returns an array of length numSessions+1, index 0 = today's top set.
+ */
+function projectProgression(startTop, numSessions, weightStep = 2.5, topReps = 8, baseReps = 6) {
+  if (!startTop || !startTop.weight || !startTop.reps) return [];
+  const out = [{ session: 0, weight: startTop.weight, reps: startTop.reps }];
+  let w = startTop.weight;
+  let r = startTop.reps;
+  for (let i = 1; i <= numSessions; i++) {
+    if (r >= topReps) {
+      w += weightStep;
+      r = baseReps;
+    } else {
+      r += 1;
+    }
+    out.push({ session: i, weight: w, reps: r });
+  }
+  return out;
+}
+
+/**
  * Returns phase progress for a plan with phaseDurationWeeks.
  *   { week: 1..N, totalWeeks: N, endDate: iso, daysLeft: int, complete: bool }
  * Returns null if no start or no duration.
@@ -1978,6 +2003,68 @@ function StatsTab({ store }) {
           </div>
         )}
       </Card>
+
+      {overloadHints.length > 0 && (() => {
+        const plan = store.state.plan || {};
+        const numSessions = Math.max(4, Math.floor(((plan.phaseDurationWeeks || 4) * 7) / Math.max(1, (plan.cycle?.length || 3))));
+        const colors = ["#10b981", "#3b82f6", "#ef4444", "#f59e0b", "#a78bfa", "#06b6d4"];
+        const picks = overloadHints.slice(0, 6);
+        const projections = picks.map((h, i) => ({
+          name: h.name,
+          color: colors[i % colors.length],
+          seq: projectProgression(h.last.top, numSessions),
+        })).filter((p) => p.seq.length > 0);
+        const labels = Array.from({ length: numSessions + 1 }, (_, i) => i === 0 ? "Now" : "S" + i);
+        return (
+          <Card title="Projection" subtitle={`If you progress every session for ${numSessions} sessions (${plan.phaseDurationWeeks || 4}-week block).`}>
+            <LineChart
+              labels={labels}
+              datasets={projections.map((p) => ({
+                label: p.name,
+                data: p.seq.map((s) => s.weight),
+                borderColor: p.color,
+                backgroundColor: p.color + "22",
+                fill: false,
+                pointRadius: 2,
+              }))}
+              yLabel="kg"
+            />
+            <div className="table-wrap" style={{ marginTop: 12 }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Exercise</th>
+                    <th className="num">Now</th>
+                    <th className="num">End</th>
+                    <th className="num">Δ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {projections.map((p) => {
+                    const start = p.seq[0];
+                    const end = p.seq[p.seq.length - 1];
+                    const delta = end.weight - start.weight;
+                    return (
+                      <tr key={p.name}>
+                        <td style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: p.color, display: "inline-block" }} />
+                          {p.name}
+                        </td>
+                        <td className="num">{start.weight}×{start.reps}</td>
+                        <td className="num">{end.weight}×{end.reps}</td>
+                        <td className="num" style={{ color: "var(--good)" }}>+{delta.toFixed(1)} kg</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 8 }}>
+              Best-case projection. Assumes you hit each session's target. Reality is messier — use it as a ceiling.
+            </div>
+          </Card>
+        );
+      })()}
 
       <Card title="PRs" hint={`${prsInRange.length} in range`}>
         {prsInRange.length === 0 ? (
