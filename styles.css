@@ -499,6 +499,47 @@ input[type="range"]::-moz-range-thumb {
 .table-wrap::-webkit-scrollbar { height: 6px; }
 .table-wrap::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 999px; }
 
+/* ===== Section header (used in Stats tab) ===== */
+.section-h {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-faint);
+  font-weight: 700;
+  margin: 4px 4px -8px;
+  padding-top: 6px;
+  display: flex; align-items: center; gap: 8px;
+}
+.section-h::after {
+  content: "";
+  flex: 1; height: 1px;
+  background: var(--border);
+}
+
+/* Range pill row */
+.range-row {
+  display: flex; gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px;
+}
+.range-row .range-btn {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  padding: 8px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+}
+.range-row .range-btn.active {
+  background: var(--accent);
+  color: #052e22;
+}
+
 /* ===== Plan / Calendar ===== */
 .cal-head {
   display: flex; align-items: center; justify-content: space-between;

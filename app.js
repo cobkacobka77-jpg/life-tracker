@@ -1604,40 +1604,62 @@ function WorkoutTab({ store, showToast, initialDate, clearInitialDate }) {
 }
 
 /* ==========================================================================
- * 12. TRAINING DATA TAB (volume, overload, PRs)
+ * 12. STATS TAB (consolidates: training, recovery, compliance, monthly)
  * ========================================================================== */
 
-function TrainingTab({ store }) {
-  const [range, setRange] = useState("week"); // week | month
-  const endIso = todayISO();
-  const startIso = range === "week" ? addDays(endIso, -6) : addDays(endIso, -29);
+function SectionHeader({ children }) {
+  return <div className="section-h">{children}</div>;
+}
 
+function StatsTab({ store }) {
+  const [range, setRange] = useState(30);
+  const todayIso = todayISO();
+  const days = lastNDays(range);
+  const dayData = days.map((d) => store.state.days[d] || {});
   const workouts = store.state.workouts;
-  const sessionsInRange = Object.entries(workouts)
-    .filter(([d]) => d >= startIso && d <= endIso)
-    .sort(([a], [b]) => a.localeCompare(b));
 
-  // Aggregate volume by muscle
+  // Sessions in range
+  const sessionDates = days.filter((d) => (workouts[d] || []).length > 0);
+
+  // Aggregate volume + RPE across range
   const muscleVol = {};
   let totalVol = 0;
-  let rpeSum = 0;
-  let rpeCount = 0;
-  let setCount = 0;
-  sessionsInRange.forEach(([_, w]) => {
-    const v = volumeOfWorkout(w);
-    Object.entries(v.byMuscle).forEach(([m, vol]) => {
-      muscleVol[m] = (muscleVol[m] || 0) + vol;
-    });
+  let totalSets = 0;
+  let rpeWSum = 0;
+  let rpeWCount = 0;
+  sessionDates.forEach((d) => {
+    const v = volumeOfWorkout(workouts[d]);
+    Object.entries(v.byMuscle).forEach(([m, vol]) => { muscleVol[m] = (muscleVol[m] || 0) + vol; });
     totalVol += v.totalVolume;
-    if (v.avgRPE) { rpeSum += v.avgRPE * v.setCount; rpeCount += v.setCount; }
-    setCount += v.setCount;
+    totalSets += v.setCount;
+    if (v.avgRPE) { rpeWSum += v.avgRPE * v.setCount; rpeWCount += v.setCount; }
   });
-  const avgRPE = rpeCount ? rpeSum / rpeCount : 0;
-
+  const avgRPE = rpeWCount ? rpeWSum / rpeWCount : 0;
   const muscleSorted = Object.entries(muscleVol).sort(([, a], [, b]) => b - a);
 
-  // PRs: best top-set per exercise across all time
-  const allTimeBest = {}; // { exercise: { weight, reps, date } }
+  // Bodyweight delta over range
+  const weightEntries = days.map((d) => ({ d, w: store.state.days[d]?.weight })).filter((x) => x.w);
+  const wStart = weightEntries[0]?.w;
+  const wEnd = weightEntries[weightEntries.length - 1]?.w;
+  const wDelta = (wStart && wEnd) ? wEnd - wStart : null;
+
+  const avgOf = (key) => {
+    const vals = dayData.map((d) => d[key]).filter((v) => v != null);
+    return vals.length ? avg(vals) : null;
+  };
+
+  // Compliance
+  const goals = store.state.goals;
+  const calHits = dayData.filter((d) => d.calories && Math.abs(d.calories - goals.calorieTarget) <= goals.calorieTarget * 0.1).length;
+  const pHits   = dayData.filter((d) => d.protein && d.protein >= goals.proteinTarget * 0.95).length;
+  const sHits   = dayData.filter((d) => d.sleep && d.sleep >= goals.sleepTarget - 0.5).length;
+  const wHits   = dayData.filter((d) => d.water && d.water >= goals.waterTarget).length;
+  const logged  = dayData.filter((d) => Object.keys(d).length > 1).length;
+  const expectedWorkouts = Math.max(1, (range / 7) * goals.workoutsPerWeek);
+  const workoutPct = (sessionDates.length / expectedWorkouts) * 100;
+
+  // PRs (best top set per exercise, all time) — show those whose date falls in range
+  const allTimeBest = {};
   Object.entries(workouts).forEach(([d, w]) => {
     (w || []).forEach((ex) => {
       let best = null;
@@ -1654,14 +1676,14 @@ function TrainingTab({ store }) {
       }
     });
   });
-
-  const prsThisRange = Object.entries(allTimeBest)
-    .filter(([_, p]) => p.date >= startIso && p.date <= endIso)
+  const rangeStart = days[0];
+  const prsInRange = Object.entries(allTimeBest)
+    .filter(([, p]) => p.date >= rangeStart && p.date <= todayIso)
     .sort((a, b) => b[1].weight - a[1].weight);
 
-  // Progressive overload suggestions: per exercise, check last 2 sessions
+  // Overload suggestions
   const overloadHints = useMemo(() => {
-    const byExercise = {}; // { name: [{ date, topSet }] }
+    const byExercise = {};
     Object.entries(workouts).sort(([a], [b]) => a.localeCompare(b)).forEach(([d, w]) => {
       (w || []).forEach((ex) => {
         let top = null;
@@ -1681,58 +1703,94 @@ function TrainingTab({ store }) {
       const last = log[log.length - 1];
       const prev = log[log.length - 2];
       let suggestion;
-      if (last.top.rpe && last.top.rpe <= 7) {
-        suggestion = `+2.5 kg or +1 rep next time (RPE ${last.top.rpe})`;
-      } else if (last.top.reps >= 12) {
-        suggestion = `+2.5 kg, reset to 6–8 reps`;
-      } else if (prev && last.top.weight === prev.top.weight && last.top.reps === prev.top.reps) {
-        suggestion = `Stalled — try +1 rep, deload, or vary stimulus`;
-      } else if (last.top.reps < 6) {
-        suggestion = `Strong load. Add 1 rep before adding weight.`;
-      } else {
-        suggestion = `Add 1 rep, then +2.5 kg when reps ≥ 10`;
-      }
+      if (last.top.rpe && last.top.rpe <= 7) suggestion = `+2.5 kg or +1 rep next time (RPE ${last.top.rpe})`;
+      else if (last.top.reps >= 12) suggestion = `+2.5 kg, reset to 6–8 reps`;
+      else if (prev && last.top.weight === prev.top.weight && last.top.reps === prev.top.reps) suggestion = `Stalled — try +1 rep, deload, or vary stimulus`;
+      else if (last.top.reps < 6) suggestion = `Strong load. Add 1 rep before adding weight.`;
+      else suggestion = `Add 1 rep, then +2.5 kg when reps ≥ 10`;
       hints.push({ name, last, prev, suggestion });
     });
-    return hints.sort((a, b) => b.last.date.localeCompare(a.last.date)).slice(0, 8);
+    return hints.sort((a, b) => b.last.date.localeCompare(a.last.date)).slice(0, 6);
   }, [workouts]);
+
+  const labels = days.map((d) => formatDate(d).replace(",", ""));
+  const series = (key) => dayData.map((d) => (d[key] != null ? d[key] : null));
+
+  const rangeLabel = range === 7 ? "this week" : range === 30 ? "this month" : range === 90 ? "last 90 days" : "last year";
 
   return (
     <div className="page">
-      <Card title="Range">
-        <div className="btn-row">
-          <button className={"btn " + (range === "week" ? "btn-primary" : "")} onClick={() => setRange("week")}>This week</button>
-          <button className={"btn " + (range === "month" ? "btn-primary" : "")} onClick={() => setRange("month")}>This month</button>
-        </div>
-      </Card>
+      <div className="range-row">
+        {[[7, "Week"], [30, "Month"], [90, "3 mo"], [365, "Year"]].map(([n, l]) => (
+          <button key={n} className={"range-btn " + (range === n ? "active" : "")} onClick={() => setRange(n)}>{l}</button>
+        ))}
+      </div>
 
-      <Card title="Summary" hint={`${sessionsInRange.length} session${sessionsInRange.length === 1 ? "" : "s"}`}>
+      <SectionHeader>Overview · {rangeLabel}</SectionHeader>
+      <Card>
         <div className="stat-grid stat-grid-3">
-          <Stat label="Sessions" value={sessionsInRange.length} />
-          <Stat label="Sets" value={setCount} />
+          <Stat label="Sessions" value={sessionDates.length} />
+          <Stat label="Sets" value={totalSets} />
           <Stat label="Total vol" value={fmt(totalVol, 0)} unit="kg" />
         </div>
         <div style={{ height: 10 }} />
-        <div className="stat-grid">
+        <div className="stat-grid stat-grid-3">
+          <Stat label="Avg sleep" value={avgOf("sleep") ? fmt(avgOf("sleep"), 1) : "—"} unit="h" />
+          <Stat label="Avg kcal" value={avgOf("calories") ? fmt(avgOf("calories"), 0) : "—"} />
+          <Stat
+            label="Weight Δ"
+            value={wDelta !== null ? (wDelta >= 0 ? "+" : "") + fmt(wDelta, 1) : "—"}
+            unit="kg"
+            deltaDir={wDelta === null ? "flat" : wDelta > 0 ? "up" : "down"}
+          />
+        </div>
+        <div style={{ height: 10 }} />
+        <div className="stat-grid stat-grid-3">
+          <Stat label="Avg protein" value={avgOf("protein") ? fmt(avgOf("protein"), 0) : "—"} unit="g" />
+          <Stat label="Avg carbs" value={avgOf("carbs") ? fmt(avgOf("carbs"), 0) : "—"} unit="g" />
+          <Stat label="Avg fats" value={avgOf("fats") ? fmt(avgOf("fats"), 0) : "—"} unit="g" />
+        </div>
+        <div style={{ height: 10 }} />
+        <div className="stat-grid stat-grid-3">
+          <Stat label="Avg stress" value={avgOf("stress") ? fmt(avgOf("stress"), 1) : "—"} unit="/10" />
+          <Stat label="Avg energy" value={avgOf("energy") ? fmt(avgOf("energy"), 1) : "—"} unit="/10" />
           <Stat label="Avg RPE" value={avgRPE ? fmt(avgRPE, 1) : "—"} />
-          <Stat label="Workouts/week target" value={`${sessionsInRange.length}/${store.state.goals.workoutsPerWeek}`} unit={range === "week" ? "" : "this mo"} />
         </div>
       </Card>
 
-      <Card title="Volume per muscle group" subtitle="Total kg lifted">
+      <SectionHeader>Compliance</SectionHeader>
+      <Card subtitle="% of days hitting target.">
+        <div className="stat-grid">
+          <ComplianceRing value={workoutPct} label="Workouts" sublabel={`${sessionDates.length}/${Math.round(expectedWorkouts)}`} />
+          <ComplianceRing value={(calHits / range) * 100} label="Calorie target" />
+        </div>
+        <div style={{ height: 16 }} />
+        <div className="stat-grid">
+          <ComplianceRing value={(pHits / range) * 100} label="Protein ≥ 95%" />
+          <ComplianceRing value={(sHits / range) * 100} label="Sleep" />
+        </div>
+        <div style={{ height: 16 }} />
+        <div className="stat-grid">
+          <ComplianceRing value={(wHits / range) * 100} label="Water" />
+          <ComplianceRing value={(logged / range) * 100} label="Days logged" />
+        </div>
+      </Card>
+
+      <SectionHeader>Training</SectionHeader>
+      <Card title="Volume per muscle" subtitle="Total kg lifted">
         {muscleSorted.length === 0 ? (
           <EmptyState icon="bars">Log a workout to see breakdown</EmptyState>
         ) : (
           <BarChart
             labels={muscleSorted.map(([m]) => m)}
-            data={muscleSorted.map(([_, v]) => Math.round(v))}
+            data={muscleSorted.map(([, v]) => Math.round(v))}
             color="#10b981"
             yLabel="kg"
           />
         )}
       </Card>
 
-      <Card title="Progressive overload — next session">
+      <Card title="Progressive overload" subtitle="Suggestion based on last top set.">
         {overloadHints.length === 0 ? (
           <EmptyState icon="trend">Log workouts for suggestions</EmptyState>
         ) : (
@@ -1753,11 +1811,11 @@ function TrainingTab({ store }) {
         )}
       </Card>
 
-      <Card title="PRs in range" hint={`${prsThisRange.length} new`}>
-        {prsThisRange.length === 0 ? (
+      <Card title="PRs" hint={`${prsInRange.length} in range`}>
+        {prsInRange.length === 0 ? (
           <EmptyState icon="award">No PRs in range</EmptyState>
         ) : (
-          prsThisRange.map(([name, p]) => (
+          prsInRange.slice(0, 10).map(([name, p]) => (
             <div className="pr-row" key={name}>
               <span className="pr-name">{name}</span>
               <span className="pr-load">{p.weight}kg × {p.reps}</span>
@@ -1766,104 +1824,36 @@ function TrainingTab({ store }) {
         )}
       </Card>
 
-      <Card title="Sessions in range" hint={`${sessionsInRange.length}`}>
-        {sessionsInRange.length === 0 ? (
-          <EmptyState icon="list">No sessions in range</EmptyState>
+      <SectionHeader>Recovery</SectionHeader>
+      <Card title="Sleep">
+        {dayData.some((d) => d.sleep) ? (
+          <LineChart
+            labels={labels}
+            datasets={[{ label: "Sleep (h)", data: series("sleep"), borderColor: "#3b82f6", backgroundColor: "rgba(59,130,246,0.15)", fill: true, spanGaps: true }]}
+            yMin={0} yMax={12}
+          />
         ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr><th>Date</th><th>Exercises</th><th className="num">Sets</th><th className="num">Volume</th></tr>
-              </thead>
-              <tbody>
-                {sessionsInRange.slice().reverse().map(([d, w]) => {
-                  const v = volumeOfWorkout(w);
-                  return (
-                    <tr key={d}>
-                      <td>{formatDate(d)}</td>
-                      <td>{w.length}</td>
-                      <td className="num">{v.setCount}</td>
-                      <td className="num">{fmt(v.totalVolume, 0)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <EmptyState icon="trend">No sleep data</EmptyState>
         )}
       </Card>
-    </div>
-  );
-}
 
-/* ==========================================================================
- * 13. RECOVERY TAB
- * ========================================================================== */
-
-function RecoveryTab({ store }) {
-  const [range, setRange] = useState(14);
-  const days = lastNDays(range);
-  const dayData = days.map((d) => store.state.days[d] || {});
-
-  const series = (key) => dayData.map((d) => (d[key] != null ? d[key] : null));
-
-  const labels = days.map((d) => formatDate(d).replace(",", ""));
-
-  const stats = [
-    { key: "sleep", label: "Sleep", color: "#3b82f6", unit: "h", target: store.state.goals.sleepTarget },
-    { key: "stress", label: "Stress", color: "#ef4444", unit: "/10", invert: true },
-    { key: "energy", label: "Energy", color: "#10b981", unit: "/10" },
-    { key: "hunger", label: "Hunger", color: "#f59e0b", unit: "/10" },
-    { key: "water", label: "Water", color: "#06b6d4", unit: "L", target: store.state.goals.waterTarget },
-  ];
-
-  return (
-    <div className="page">
-      <Card title="Range">
-        <div className="btn-row">
-          {[7, 14, 30, 90].map((n) => (
-            <button key={n} className={"btn " + (range === n ? "btn-primary" : "")} onClick={() => setRange(n)}>{n}d</button>
-          ))}
-        </div>
+      <Card title="Stress, energy, hunger">
+        {dayData.some((d) => d.stress != null || d.energy != null || d.hunger != null) ? (
+          <LineChart
+            labels={labels}
+            datasets={[
+              { label: "Stress", data: series("stress"), borderColor: "#ef4444", spanGaps: true },
+              { label: "Energy", data: series("energy"), borderColor: "#10b981", spanGaps: true },
+              { label: "Hunger", data: series("hunger"), borderColor: "#f59e0b", spanGaps: true },
+            ]}
+            yMin={1} yMax={10}
+          />
+        ) : (
+          <EmptyState icon="trend">No mood data</EmptyState>
+        )}
       </Card>
 
-      <Card title="Recovery summary" hint={`${range}-day average`}>
-        <div className="stat-grid stat-grid-3">
-          {stats.map((s) => {
-            const vals = series(s.key).filter((v) => v != null);
-            const a = avg(vals);
-            return <Stat key={s.key} label={s.label} value={vals.length ? fmt(a, 1) : "—"} unit={s.unit} />;
-          })}
-        </div>
-      </Card>
-
-      {stats.map((s) => {
-        const data = series(s.key);
-        const hasData = data.some((v) => v != null);
-        return (
-          <Card key={s.key} title={`${s.label} trend`} hint={`${range}d`}>
-            {hasData ? (
-              <LineChart
-                labels={labels}
-                datasets={[{
-                  label: s.label,
-                  data,
-                  borderColor: s.color,
-                  backgroundColor: s.color + "33",
-                  fill: true,
-                  spanGaps: true,
-                }]}
-                yMin={s.key === "sleep" || s.key === "water" ? 0 : 1}
-                yMax={s.key === "sleep" ? 12 : s.key === "water" ? 6 : 10}
-              />
-            ) : (
-              <EmptyState icon="trend">No {s.label.toLowerCase()} data</EmptyState>
-            )}
-          </Card>
-        );
-      })}
-
-      <Card title="Calories trend" hint={`${range}d`}>
+      <Card title="Calories">
         {dayData.some((d) => d.calories) ? (
           <LineChart
             labels={labels}
@@ -1880,70 +1870,30 @@ function RecoveryTab({ store }) {
           <EmptyState icon="flame">No calorie data</EmptyState>
         )}
       </Card>
-    </div>
-  );
-}
 
-/* ==========================================================================
- * 14. COMPLIANCE TAB
- * ========================================================================== */
-
-function ComplianceTab({ store }) {
-  const goals = store.state.goals;
-  const days = lastNDays(7);
-  const dayData = days.map((d) => store.state.days[d] || {});
-  const sessionsThisWeek = days.filter((d) => store.state.workouts[d] && store.state.workouts[d].length > 0).length;
-
-  const workoutPct = goals.workoutsPerWeek ? (sessionsThisWeek / goals.workoutsPerWeek) * 100 : 0;
-  const caloriePct = (() => {
-    const hits = dayData.filter((d) => d.calories && Math.abs(d.calories - goals.calorieTarget) <= goals.calorieTarget * 0.1).length;
-    return (hits / 7) * 100;
-  })();
-  const proteinPct = (() => {
-    const hits = dayData.filter((d) => d.protein && d.protein >= goals.proteinTarget * 0.95).length;
-    return (hits / 7) * 100;
-  })();
-  const sleepPct = (() => {
-    const hits = dayData.filter((d) => d.sleep && d.sleep >= goals.sleepTarget - 0.5).length;
-    return (hits / 7) * 100;
-  })();
-  const waterPct = (() => {
-    const hits = dayData.filter((d) => d.water && d.water >= goals.waterTarget).length;
-    return (hits / 7) * 100;
-  })();
-
-  const logPct = (dayData.filter((d) => Object.keys(d).length > 1).length / 7) * 100;
-
-  return (
-    <div className="page">
-      <Card title="This week" subtitle="Last 7 days — target hit rate.">
-        <div className="stat-grid">
-          <ComplianceRing value={workoutPct} label="Workouts" sublabel={`${sessionsThisWeek}/${goals.workoutsPerWeek}`} />
-          <ComplianceRing value={caloriePct} label="Calorie target (±10%)" />
-        </div>
-        <div style={{ height: 16 }} />
-        <div className="stat-grid">
-          <ComplianceRing value={proteinPct} label="Protein ≥ 95%" />
-          <ComplianceRing value={sleepPct} label="Sleep hit" />
-        </div>
-        <div style={{ height: 16 }} />
-        <div className="stat-grid">
-          <ComplianceRing value={waterPct} label="Water target" />
-          <ComplianceRing value={logPct} label="Days logged" />
-        </div>
+      <Card title="Water">
+        {dayData.some((d) => d.water) ? (
+          <LineChart
+            labels={labels}
+            datasets={[{ label: "Water (L)", data: series("water"), borderColor: "#06b6d4", backgroundColor: "rgba(6,182,212,0.12)", fill: true, spanGaps: true }]}
+            yMin={0} yMax={6}
+          />
+        ) : (
+          <EmptyState icon="trend">No water data</EmptyState>
+        )}
       </Card>
 
-      <Card title="Per-day status" hint="Last 7 days">
+      <SectionHeader>Per-day breakdown</SectionHeader>
+      <Card hint="Last 14 in range">
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr><th>Day</th><th className="num">Cal</th><th className="num">P</th><th className="num">Sleep</th><th className="num">Train</th></tr>
             </thead>
             <tbody>
-              {days.slice().reverse().map((d) => {
+              {days.slice().reverse().slice(0, 14).map((d) => {
                 const day = store.state.days[d] || {};
-                const sessions = store.state.workouts[d] || [];
-                const trained = sessions.length > 0;
+                const trained = (workouts[d] || []).length > 0;
                 const calOK = day.calories && Math.abs(day.calories - goals.calorieTarget) <= goals.calorieTarget * 0.1;
                 const pOK = day.protein && day.protein >= goals.proteinTarget * 0.95;
                 const sOK = day.sleep && day.sleep >= goals.sleepTarget - 0.5;
@@ -1971,163 +1921,33 @@ function ComplianceTab({ store }) {
           </table>
         </div>
       </Card>
-    </div>
-  );
-}
 
-/* ==========================================================================
- * 15. MONTHLY ANALYTICS TAB
- * ========================================================================== */
-
-function AnalyticsTab({ store }) {
-  const [month, setMonth] = useState(monthOf(todayISO()));
-
-  // Get all days in that month
-  const days = Object.entries(store.state.days)
-    .filter(([d]) => monthOf(d) === month)
-    .map(([d, x]) => ({ date: d, ...x }))
-    .sort((a, b) => a.date.localeCompare(b.date));
-
-  const workouts = Object.entries(store.state.workouts)
-    .filter(([d]) => monthOf(d) === month);
-
-  const avgVal = (key) => {
-    const vals = days.map((d) => d[key]).filter((v) => v != null);
-    return vals.length ? avg(vals) : null;
-  };
-
-  const sumVal = (key) => {
-    const vals = days.map((d) => d[key]).filter((v) => v != null);
-    return vals.length ? sum(vals) : 0;
-  };
-
-  const weightStart = days.find((d) => d.weight)?.weight;
-  const weightEnd = [...days].reverse().find((d) => d.weight)?.weight;
-  const weightChange = (weightStart && weightEnd) ? weightEnd - weightStart : null;
-
-  const muscleVol = {};
-  workouts.forEach(([_, w]) => {
-    const v = volumeOfWorkout(w);
-    Object.entries(v.byMuscle).forEach(([m, vol]) => {
-      muscleVol[m] = (muscleVol[m] || 0) + vol;
-    });
-  });
-  const muscleSorted = Object.entries(muscleVol).sort(([, a], [, b]) => b - a);
-
-  // PRs this month
-  const monthPRs = [];
-  Object.entries(store.state.workouts).forEach(([d, w]) => {
-    if (monthOf(d) !== month) return;
-    (w || []).forEach((ex) => {
-      let best = null;
-      (ex.sets || []).forEach((s) => {
-        if (!s.reps || !s.weight) return;
-        if (!best || s.weight * s.reps > best.weight * best.reps) best = { ...s };
-      });
-      if (best) monthPRs.push({ name: ex.exercise, ...best });
-    });
-  });
-  monthPRs.sort((a, b) => b.weight - a.weight);
-  const topPRs = monthPRs.slice(0, 10);
-
-  const monthOptions = (() => {
-    const set = new Set();
-    Object.keys(store.state.days).forEach((d) => set.add(monthOf(d)));
-    Object.keys(store.state.workouts).forEach((d) => set.add(monthOf(d)));
-    set.add(monthOf(todayISO()));
-    return [...set].sort().reverse();
-  })();
-
-  const formatMonth = (m) => {
-    const [y, mm] = m.split("-").map(Number);
-    return new Date(y, mm - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
-  };
-
-  const compliance = (() => {
-    if (days.length === 0) return 0;
-    const target = store.state.goals.calorieTarget;
-    const hits = days.filter((d) => d.calories && Math.abs(d.calories - target) <= target * 0.1).length;
-    return (hits / days.length) * 100;
-  })();
-
-  return (
-    <div className="page">
-      <Card title="Month">
-        <select value={month} onChange={(e) => setMonth(e.target.value)}>
-          {monthOptions.map((m) => <option key={m} value={m}>{formatMonth(m)}</option>)}
-        </select>
-        <div style={{ fontSize: 12, color: "var(--text-faint)", marginTop: 8 }}>
-          {days.length} days logged · {workouts.length} sessions
-        </div>
-      </Card>
-
-      <Card title="Nutrition averages">
-        <div className="stat-grid">
-          <Stat label="Avg calories" value={avgVal("calories") ? fmt(avgVal("calories"), 0) : "—"} unit="kcal" />
-          <Stat label="Avg protein" value={avgVal("protein") ? fmt(avgVal("protein"), 0) : "—"} unit="g" />
-        </div>
-        <div style={{ height: 10 }} />
-        <div className="stat-grid">
-          <Stat label="Avg carbs" value={avgVal("carbs") ? fmt(avgVal("carbs"), 0) : "—"} unit="g" />
-          <Stat label="Avg fats" value={avgVal("fats") ? fmt(avgVal("fats"), 0) : "—"} unit="g" />
-        </div>
-      </Card>
-
-      <Card title="Recovery averages">
-        <div className="stat-grid stat-grid-3">
-          <Stat label="Sleep" value={avgVal("sleep") ? fmt(avgVal("sleep"), 1) : "—"} unit="h" />
-          <Stat label="Stress" value={avgVal("stress") ? fmt(avgVal("stress"), 1) : "—"} unit="/10" />
-          <Stat label="Energy" value={avgVal("energy") ? fmt(avgVal("energy"), 1) : "—"} unit="/10" />
-        </div>
-        <div style={{ height: 10 }} />
-        <div className="stat-grid stat-grid-3">
-          <Stat label="Hunger" value={avgVal("hunger") ? fmt(avgVal("hunger"), 1) : "—"} unit="/10" />
-          <Stat label="Water" value={avgVal("water") ? fmt(avgVal("water"), 1) : "—"} unit="L" />
-          <Stat label="RestHR" value={avgVal("restingHR") ? fmt(avgVal("restingHR"), 0) : "—"} unit="bpm" />
-        </div>
-      </Card>
-
-      <Card title="Body composition">
-        <div className="stat-grid stat-grid-3">
-          <Stat label="Start" value={weightStart ? fmt(weightStart, 1) : "—"} unit="kg" />
-          <Stat label="End" value={weightEnd ? fmt(weightEnd, 1) : "—"} unit="kg" />
-          <Stat
-            label="Δ"
-            value={weightChange !== null ? (weightChange >= 0 ? "+" : "") + fmt(weightChange, 1) : "—"}
-            unit="kg"
-            deltaDir={weightChange === null ? "flat" : weightChange > 0 ? "up" : "down"}
-          />
-        </div>
-      </Card>
-
-      <Card title="Training volume per muscle" subtitle="Total kg lifted this month">
-        {muscleSorted.length === 0 ? (
-          <EmptyState icon="bars">No workouts this month</EmptyState>
+      <SectionHeader>Sessions</SectionHeader>
+      <Card hint={`${sessionDates.length}`}>
+        {sessionDates.length === 0 ? (
+          <EmptyState icon="list">No sessions in range</EmptyState>
         ) : (
-          <BarChart
-            labels={muscleSorted.map(([m]) => m)}
-            data={muscleSorted.map(([_, v]) => Math.round(v))}
-            color="#3b82f6"
-            yLabel="kg"
-          />
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr><th>Date</th><th>Exercises</th><th className="num">Sets</th><th className="num">Volume</th></tr>
+              </thead>
+              <tbody>
+                {sessionDates.slice().reverse().map((d) => {
+                  const v = volumeOfWorkout(workouts[d]);
+                  return (
+                    <tr key={d}>
+                      <td>{formatDate(d)}</td>
+                      <td>{workouts[d].length}</td>
+                      <td className="num">{v.setCount}</td>
+                      <td className="num">{fmt(v.totalVolume, 0)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
-      </Card>
-
-      <Card title="Top lifts this month">
-        {topPRs.length === 0 ? (
-          <EmptyState icon="award">Log workouts to see top lifts</EmptyState>
-        ) : (
-          topPRs.map((p, i) => (
-            <div key={i} className="pr-row">
-              <span className="pr-name">{p.name}</span>
-              <span className="pr-load">{p.weight}kg × {p.reps}{p.rpe ? ` @ ${p.rpe}` : ""}</span>
-            </div>
-          ))
-        )}
-      </Card>
-
-      <Card title="Compliance score" hint="calorie target ±10%">
-        <ComplianceRing value={compliance} label={`${Math.round(days.length * compliance / 100)} of ${days.length} days on target`} />
       </Card>
     </div>
   );
@@ -2247,10 +2067,7 @@ function App() {
     { id: "plan", label: "Plan" },
     { id: "workout", label: "Workout" },
     { id: "body", label: "Body" },
-    { id: "training", label: "Training" },
-    { id: "recovery", label: "Recovery" },
-    { id: "compliance", label: "Compliance" },
-    { id: "analytics", label: "Monthly" },
+    { id: "stats", label: "Stats" },
     { id: "settings", label: "Settings" },
   ];
 
@@ -2287,10 +2104,7 @@ function App() {
         />
       )}
       {tab === "body" && <BodyTab store={store} showToast={showToast} />}
-      {tab === "training" && <TrainingTab store={store} />}
-      {tab === "recovery" && <RecoveryTab store={store} />}
-      {tab === "compliance" && <ComplianceTab store={store} />}
-      {tab === "analytics" && <AnalyticsTab store={store} />}
+      {tab === "stats" && <StatsTab store={store} />}
       {tab === "settings" && <SettingsTab store={store} showToast={showToast} />}
 
       {toastNode}
