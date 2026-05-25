@@ -374,6 +374,102 @@ function useToast() {
  * 7. COMMON COMPONENTS
  * ========================================================================== */
 
+/* Custom line icons — no emoji. All draw on a 24×24 grid. */
+const ICONS = {
+  dumbbell: (
+    <g>
+      <line x1="8" y1="12" x2="16" y2="12" />
+      <line x1="6" y1="9" x2="6" y2="15" />
+      <line x1="18" y1="9" x2="18" y2="15" />
+      <line x1="4" y1="10.5" x2="4" y2="13.5" />
+      <line x1="20" y1="10.5" x2="20" y2="13.5" />
+    </g>
+  ),
+  camera: (
+    <g>
+      <path d="M4 8h3l2-2h6l2 2h3v11H4z" />
+      <circle cx="12" cy="13" r="3.5" />
+    </g>
+  ),
+  bars: (
+    <g>
+      <line x1="3" y1="20" x2="21" y2="20" />
+      <line x1="6" y1="20" x2="6" y2="14" />
+      <line x1="11" y1="20" x2="11" y2="9" />
+      <line x1="16" y1="20" x2="16" y2="15" />
+      <line x1="20" y1="20" x2="20" y2="6" />
+    </g>
+  ),
+  trend: (
+    <g>
+      <polyline points="3 17 9 11 14 14 21 6" />
+      <polyline points="15 6 21 6 21 12" />
+    </g>
+  ),
+  weight: (
+    <g>
+      <polyline points="3 17 9 12 14 15 21 8" />
+      <circle cx="9" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="14" cy="15" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="21" cy="8" r="1.5" fill="currentColor" stroke="none" />
+    </g>
+  ),
+  award: (
+    <g>
+      <circle cx="12" cy="9" r="5" />
+      <polyline points="9 13 7.5 21 12 18.5 16.5 21 15 13" />
+    </g>
+  ),
+  list: (
+    <g>
+      <line x1="9" y1="6" x2="20" y2="6" />
+      <line x1="9" y1="12" x2="20" y2="12" />
+      <line x1="9" y1="18" x2="20" y2="18" />
+      <circle cx="4.5" cy="6" r="1" fill="currentColor" stroke="none" />
+      <circle cx="4.5" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="4.5" cy="18" r="1" fill="currentColor" stroke="none" />
+    </g>
+  ),
+  flame: (
+    <g>
+      <path d="M12 3c0 4 5 5 5 10a5 5 0 01-10 0c0-3 2-3 2-6 1 1 2 1 2 3 0-2 1-4 1-7z" />
+    </g>
+  ),
+  alert: (
+    <g>
+      <path d="M10.3 4L2.5 17.5a2 2 0 001.7 3h15.6a2 2 0 001.7-3L13.7 4a2 2 0 00-3.4 0z" />
+      <line x1="12" y1="10" x2="12" y2="14" />
+      <circle cx="12" cy="17.3" r="0.6" fill="currentColor" stroke="none" />
+    </g>
+  ),
+  check: (
+    <g>
+      <polyline points="4 12 10 18 20 6" />
+    </g>
+  ),
+  dot: (
+    <circle cx="12" cy="12" r="4" fill="currentColor" stroke="none" />
+  ),
+};
+
+function Icon({ name, size = 26 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      {ICONS[name]}
+    </svg>
+  );
+}
+
+function EmptyState({ icon, children }) {
+  return (
+    <div className="empty">
+      <div className="ic"><Icon name={icon} size={26} /></div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
 function Card({ title, hint, subtitle, children }) {
   return (
     <div className="card">
@@ -624,7 +720,7 @@ function DailyTab({ store, showToast }) {
         <DateNav date={date} onChange={setDate} />
       </Card>
 
-      <Card title="Nutrition" subtitle="Enter calories, then auto-fill macros or override.">
+      <Card title="Nutrition" subtitle="Enter kcal — estimate macros or override.">
         <div className="field-row">
           <NumInput label="Calories" value={day.calories} onChange={(v) => update({ calories: v })} placeholder="2800" />
           <div style={{ alignSelf: "end" }}>
@@ -719,7 +815,7 @@ function DailyTab({ store, showToast }) {
         />
       </Card>
 
-      <button className="btn btn-primary btn-block" onClick={() => showToast("Saved ✓")}>
+      <button className="btn btn-primary btn-block" onClick={() => showToast("Saved")}>
         Done for today
       </button>
     </div>
@@ -754,7 +850,7 @@ function BodyTab({ store, showToast }) {
         canvas.getContext("2d").drawImage(img, 0, 0, w, h);
         const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
         store.setPhoto(date, dataUrl);
-        showToast("Photo saved ✓");
+        showToast("Photo saved");
       };
       img.src = ev.target.result;
     };
@@ -845,10 +941,7 @@ function BodyTab({ store, showToast }) {
             yLabel="kg"
           />
         ) : (
-          <div className="empty">
-            <div className="big">⚖️</div>
-            <div>Log weight on 2+ days to see your trend</div>
-          </div>
+          <EmptyState icon="weight">Add 2+ entries to see trend</EmptyState>
         )}
         <div className="stat-grid stat-grid-3" style={{ marginTop: 14 }}>
           <Stat label="Current" value={currentWeight ? fmt(currentWeight) : "—"} unit="kg" />
@@ -870,7 +963,7 @@ function BodyTab({ store, showToast }) {
 
       <Card title="Recent photos" hint={`${Object.keys(store.state.photos).length} total`}>
         {photoEntries.length === 0 ? (
-          <div className="empty"><div className="big">📷</div><div>No photos yet</div></div>
+          <EmptyState icon="camera">No photos yet</EmptyState>
         ) : (
           <div className="photo-grid">
             {photoEntries.map(([d, url]) => (
@@ -972,7 +1065,7 @@ function WorkoutTab({ store, showToast }) {
         </div>
       </Card>
 
-      <Card title="Import from Hevy" subtitle="Tap 'Share workout' in Hevy → Copy text → paste below.">
+      <Card title="Import from Hevy" subtitle="Hevy app → Share workout → paste below.">
         <textarea
           rows={6}
           value={pasteText}
@@ -986,7 +1079,12 @@ function WorkoutTab({ store, showToast }) {
         </div>
         {parseWarn.length > 0 && (
           <div style={{ marginTop: 10, fontSize: 12, color: "var(--warn)" }}>
-            {parseWarn.map((w, i) => <div key={i}>⚠ {w}</div>)}
+            {parseWarn.map((w, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 4 }}>
+                <span style={{ flexShrink: 0, marginTop: 1 }}><Icon name="alert" size={14} /></span>
+                <span>{w}</span>
+              </div>
+            ))}
           </div>
         )}
       </Card>
@@ -996,10 +1094,7 @@ function WorkoutTab({ store, showToast }) {
         hint={vol.setCount > 0 ? `${vol.setCount} sets · ${fmt(vol.totalVolume)} kg vol${vol.avgRPE ? ` · RPE ${fmt(vol.avgRPE, 1)}` : ""}` : ""}
       >
         {workout.length === 0 ? (
-          <div className="empty">
-            <div className="big">🏋️</div>
-            <div>No exercises yet — paste from Hevy above or add manually.</div>
-          </div>
+          <EmptyState icon="dumbbell">Paste from Hevy above, or add manually</EmptyState>
         ) : (
           workout.map((ex, i) => (
             <div className="ex-block" key={i}>
@@ -1161,9 +1256,9 @@ function TrainingTab({ store }) {
         </div>
       </Card>
 
-      <Card title="Volume per muscle group" subtitle="Sets × reps × weight (kg)">
+      <Card title="Volume per muscle group" subtitle="Total kg lifted">
         {muscleSorted.length === 0 ? (
-          <div className="empty"><div className="big">📊</div><div>Log a workout to see volume breakdown.</div></div>
+          <EmptyState icon="bars">Log a workout to see breakdown</EmptyState>
         ) : (
           <BarChart
             labels={muscleSorted.map(([m]) => m)}
@@ -1176,7 +1271,7 @@ function TrainingTab({ store }) {
 
       <Card title="Progressive overload — next session">
         {overloadHints.length === 0 ? (
-          <div className="empty"><div className="big">📈</div><div>Log workouts to get overload suggestions.</div></div>
+          <EmptyState icon="trend">Log workouts for suggestions</EmptyState>
         ) : (
           <div>
             {overloadHints.map((h, i) => (
@@ -1197,7 +1292,7 @@ function TrainingTab({ store }) {
 
       <Card title="PRs in range" hint={`${prsThisRange.length} new`}>
         {prsThisRange.length === 0 ? (
-          <div className="empty"><div className="big">🏆</div><div>No PRs in this range yet.</div></div>
+          <EmptyState icon="award">No PRs in range</EmptyState>
         ) : (
           prsThisRange.map(([name, p]) => (
             <div className="pr-row" key={name}>
@@ -1210,7 +1305,7 @@ function TrainingTab({ store }) {
 
       <Card title="Sessions in range" hint={`${sessionsInRange.length}`}>
         {sessionsInRange.length === 0 ? (
-          <div className="empty"><div className="big">📋</div><div>No sessions in this range.</div></div>
+          <EmptyState icon="list">No sessions in range</EmptyState>
         ) : (
           <div className="table-wrap">
             <table className="table">
@@ -1299,7 +1394,7 @@ function RecoveryTab({ store }) {
                 yMax={s.key === "sleep" ? 12 : s.key === "water" ? 6 : 10}
               />
             ) : (
-              <div className="empty"><div className="big">📈</div><div>No {s.label.toLowerCase()} data yet.</div></div>
+              <EmptyState icon="trend">No {s.label.toLowerCase()} data</EmptyState>
             )}
           </Card>
         );
@@ -1319,7 +1414,7 @@ function RecoveryTab({ store }) {
             }]}
           />
         ) : (
-          <div className="empty"><div className="big">🍽️</div><div>No calorie data yet.</div></div>
+          <EmptyState icon="flame">No calorie data</EmptyState>
         )}
       </Card>
     </div>
@@ -1358,7 +1453,7 @@ function ComplianceTab({ store }) {
 
   return (
     <div className="page">
-      <Card title="This week" subtitle="Last 7 days — % of target hit per day or planned sessions completed.">
+      <Card title="This week" subtitle="Last 7 days — target hit rate.">
         <div className="stat-grid">
           <ComplianceRing value={workoutPct} label="Workouts" sublabel={`${sessionsThisWeek}/${goals.workoutsPerWeek}`} />
           <ComplianceRing value={caloriePct} label="Calorie target (±10%)" />
@@ -1402,7 +1497,9 @@ function ComplianceTab({ store }) {
                       {day.sleep ? fmt(day.sleep, 1) : "—"}
                     </td>
                     <td className="num" style={{ color: trained ? "var(--good)" : "var(--text-faint)" }}>
-                      {trained ? "✓" : "—"}
+                      {trained
+                        ? <span style={{ display: "inline-flex", verticalAlign: "middle" }}><Icon name="check" size={14} /></span>
+                        : "—"}
                     </td>
                   </tr>
                 );
@@ -1540,9 +1637,9 @@ function AnalyticsTab({ store }) {
         </div>
       </Card>
 
-      <Card title="Training volume per muscle" subtitle="Sum of sets × reps × weight (kg) this month">
+      <Card title="Training volume per muscle" subtitle="Total kg lifted this month">
         {muscleSorted.length === 0 ? (
-          <div className="empty"><div className="big">📊</div><div>No workouts this month yet.</div></div>
+          <EmptyState icon="bars">No workouts this month</EmptyState>
         ) : (
           <BarChart
             labels={muscleSorted.map(([m]) => m)}
@@ -1555,7 +1652,7 @@ function AnalyticsTab({ store }) {
 
       <Card title="Top lifts this month">
         {topPRs.length === 0 ? (
-          <div className="empty"><div className="big">🏆</div><div>Log workouts to see top lifts.</div></div>
+          <EmptyState icon="award">Log workouts to see top lifts</EmptyState>
         ) : (
           topPRs.map((p, i) => (
             <div key={i} className="pr-row">
@@ -1589,7 +1686,7 @@ function SettingsTab({ store, showToast }) {
 
   return (
     <div className="page">
-      <Card title="Daily targets" subtitle="Used for macro bars and compliance scoring.">
+      <Card title="Daily targets">
         <div className="settings-row">
           <label>Calories</label>
           <input type="number" value={goals.calorieTarget} onChange={(e) => store.setGoals({ calorieTarget: parseInt(e.target.value) || 0 })} />
@@ -1620,7 +1717,7 @@ function SettingsTab({ store, showToast }) {
         </div>
       </Card>
 
-      <Card title="Data" subtitle="Everything lives in your browser's local storage. Back up regularly.">
+      <Card title="Data" subtitle="Stored locally in this browser. Export to back up.">
         <div className="btn-row">
           <button className="btn" onClick={store.exportData}>Export JSON</button>
           <button className="btn" onClick={() => fileRef.current && fileRef.current.click()}>Import JSON</button>
@@ -1632,9 +1729,8 @@ function SettingsTab({ store, showToast }) {
 
       <Card title="About">
         <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.5 }}>
-          Personal tracking dashboard for muscle growth optimization.<br />
-          Data stored locally in your browser — no account, no cloud.<br />
-          Add this page to your phone home screen for an app-like feel.
+          Local-only. No account, no cloud.<br />
+          Add to home screen for app-like feel.
         </div>
       </Card>
     </div>

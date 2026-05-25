@@ -387,11 +387,22 @@ input[type="range"]::-moz-range-thumb {
 /* Empty state */
 .empty {
   text-align: center;
-  padding: 24px 12px;
+  padding: 28px 12px;
   color: var(--text-faint);
   font-size: 13px;
 }
-.empty .big { font-size: 32px; margin-bottom: 8px; }
+.empty .ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.08);
+  color: var(--accent);
+}
+.empty .ic svg { display: block; }
 
 /* Toast */
 .toast {
