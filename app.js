@@ -1301,32 +1301,11 @@ function DailyTab({ store, showToast }) {
 
       <Card title="Notes">
         <TextInput
-          label="Meal timing (pre/post workout)"
-          value={day.mealTiming}
-          onChange={(v) => update({ mealTiming: v })}
-          placeholder="e.g. ate 2h before, banana + rice cakes post"
-        />
-        <div style={{ height: 10 }} />
-        <TextInput
           label="How did today go?"
           value={day.notes}
           onChange={(v) => update({ notes: v })}
           placeholder="Free text — pump, mood, anything off…"
           multiline
-        />
-      </Card>
-
-      <Card title="Optional metrics" hint="if relevant">
-        <div className="field-row">
-          <NumInput label="Digestion (1–10)" value={day.digestion} onChange={(v) => update({ digestion: v })} placeholder="8" />
-          <NumInput label="Resting HR" value={day.restingHR} onChange={(v) => update({ restingHR: v })} suffix="bpm" placeholder="60" />
-        </div>
-        <div style={{ height: 10 }} />
-        <TextInput
-          label="Injury / pain (free text)"
-          value={day.injuryNote}
-          onChange={(v) => update({ injuryNote: v })}
-          placeholder="e.g. left shoulder 4/10 during pressing"
         />
       </Card>
 
