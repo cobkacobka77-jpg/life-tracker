@@ -28,6 +28,36 @@ const DEFAULT_STATE = {
     startDate: null,     // first day logged
     startWeight: null,
   },
+  // Training plan: rotates through `cycle` starting from `startDate`.
+  plan: {
+    startDate: "2026-05-27",        // Wed 27 May 2026 = Upper
+    cycle: ["upper", "lower", "rest"],
+    routines: {
+      upper: {
+        name: "Upper",
+        exercises: [
+          { exercise: "Pull Up",                muscle: "Back" },
+          { exercise: "Seated Row (Machine)",   muscle: "Back" },
+          { exercise: "Overhead Press (Barbell)", muscle: "Shoulders" },
+          { exercise: "Unilateral Tricep",      muscle: "Triceps" },
+          { exercise: "Triceps Pushdown",       muscle: "Triceps" },
+          { exercise: "Reverse Forearm Curl",   muscle: "Forearms" },
+          { exercise: "Arm Wrestle Curl",       muscle: "Biceps" },
+          { exercise: "Preacher Curl (Machine)", muscle: "Biceps" },
+          { exercise: "Chest Press (Plates)",   muscle: "Chest" },
+          { exercise: "Leg Raise Parallel Bars", muscle: "Core" },
+        ],
+      },
+      lower: {
+        name: "Lower",
+        exercises: [], // fill in via Plan tab
+      },
+      rest: {
+        name: "Rest",
+        exercises: [],
+      },
+    },
+  },
 };
 
 function loadState() {
@@ -36,12 +66,23 @@ function loadState() {
     if (!raw) return structuredClone(DEFAULT_STATE);
     const parsed = JSON.parse(raw);
     // shallow merge to handle schema additions
-    return {
+    const merged = {
       ...structuredClone(DEFAULT_STATE),
       ...parsed,
       goals: { ...DEFAULT_STATE.goals, ...(parsed.goals || {}) },
       meta: { ...DEFAULT_STATE.meta, ...(parsed.meta || {}) },
     };
+    // Plan needs deeper merge so missing routines fall back to defaults.
+    const planSaved = parsed.plan || {};
+    merged.plan = {
+      ...DEFAULT_STATE.plan,
+      ...planSaved,
+      routines: {
+        ...DEFAULT_STATE.plan.routines,
+        ...(planSaved.routines || {}),
+      },
+    };
+    return merged;
   } catch (e) {
     console.warn("Failed to load state, resetting", e);
     return structuredClone(DEFAULT_STATE);
@@ -107,6 +148,23 @@ function isoMonthStart(iso) {
 function monthOf(iso) {
   const [y, m] = iso.split("-");
   return `${y}-${m}`;
+}
+
+/**
+ * Given a plan { startDate, cycle: [..] } returns the cycle key for `iso`,
+ * or null if iso is before the start date or the plan is unconfigured.
+ */
+function splitForDate(plan, iso) {
+  if (!plan || !plan.startDate || !plan.cycle || plan.cycle.length === 0) return null;
+  const delta = daysBetween(plan.startDate, iso);
+  if (delta < 0) return null;
+  const len = plan.cycle.length;
+  return plan.cycle[((delta % len) + len) % len];
+}
+
+function weekdayShort(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short" });
 }
 
 /* ==========================================================================
@@ -324,6 +382,23 @@ function useStore() {
     setState((s) => ({ ...s, goals: { ...s.goals, ...patch } }));
   }, []);
 
+  const setPlan = useCallback((patch) => {
+    setState((s) => ({ ...s, plan: { ...s.plan, ...patch } }));
+  }, []);
+
+  const setRoutine = useCallback((key, patch) => {
+    setState((s) => ({
+      ...s,
+      plan: {
+        ...s.plan,
+        routines: {
+          ...s.plan.routines,
+          [key]: { ...(s.plan.routines[key] || { name: key, exercises: [] }), ...patch },
+        },
+      },
+    }));
+  }, []);
+
   const resetAll = useCallback(() => {
     if (confirm("Wipe ALL tracking data? This can't be undone.")) {
       localStorage.removeItem(STORAGE_KEY);
@@ -355,7 +430,7 @@ function useStore() {
     reader.readAsText(file);
   }, []);
 
-  return { state, setDay, setWorkout, setPhoto, removePhoto, setGoals, resetAll, exportData, importData };
+  return { state, setDay, setWorkout, setPhoto, removePhoto, setGoals, setPlan, setRoutine, resetAll, exportData, importData };
 }
 
 function useToast() {
@@ -693,6 +768,347 @@ function BarChart({ labels, data, color = "#10b981", yLabel }) {
 }
 
 /* ==========================================================================
+ * 8b. CALENDAR + PLAN TAB
+ * ========================================================================== */
+
+function Calendar({ plan, workouts, monthIso, selectedIso, todayIso, onSelect }) {
+  const [y, m] = monthIso.split("-").map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  let firstDow = new Date(y, m - 1, 1).getDay(); // 0=Sun
+  firstDow = firstDow === 0 ? 6 : firstDow - 1;  // shift to 0=Mon
+
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push({ empty: true, key: "e" + i });
+  for (let d = 1; d <= daysInMonth; d++) {
+    const iso = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    cells.push({ iso, d });
+  }
+
+  return (
+    <div>
+      <div className="cal-grid">
+        {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((l) => (
+          <div key={l} className="cal-dow">{l}</div>
+        ))}
+        {cells.map((c) => {
+          if (c.empty) return <div key={c.key} className="cal-cell empty" />;
+          const split = splitForDate(plan, c.iso);
+          const logged = (workouts[c.iso] || []).length > 0;
+          const cls = [
+            "cal-cell",
+            c.iso === todayIso ? "today" : "",
+            c.iso === selectedIso ? "selected" : "",
+            split === "rest" && c.iso > todayIso ? "future-rest" : "",
+          ].filter(Boolean).join(" ");
+          const pillLabel =
+            split === "upper" ? "U" :
+            split === "lower" ? "L" :
+            split === "rest"  ? "R" : "";
+          return (
+            <button key={c.iso} className={cls} onClick={() => onSelect(c.iso)}>
+              <div className="cal-day">{c.d}</div>
+              {pillLabel && (
+                <div className={"cal-pill " + (logged ? "logged" : split)}>
+                  {logged ? "✱" : pillLabel}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 12, marginTop: 12, fontSize: 11, color: "var(--text-faint)", flexWrap: "wrap" }}>
+        <span><span className="cal-pill upper" style={{ marginRight: 4 }}>U</span> Upper</span>
+        <span><span className="cal-pill lower" style={{ marginRight: 4 }}>L</span> Lower</span>
+        <span><span className="cal-pill rest"  style={{ marginRight: 4 }}>R</span> Rest</span>
+        <span><span className="cal-pill logged" style={{ marginRight: 4 }}>✱</span> Logged</span>
+      </div>
+    </div>
+  );
+}
+
+function RoutineEditor({ routineKey, routine, onChange }) {
+  const muscleList = ["Chest", "Back", "Shoulders", "Rear Delts", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Calves", "Core", "Forearms", "Other"];
+  const ex = routine.exercises || [];
+
+  const update = (next) => onChange({ ...routine, exercises: next });
+
+  const setItem = (i, patch) => {
+    const next = [...ex];
+    next[i] = { ...next[i], ...patch };
+    if (patch.exercise && !patch.muscle) next[i].muscle = inferMuscle(patch.exercise);
+    update(next);
+  };
+
+  const add = () => update([...ex, { exercise: "New exercise", muscle: "Other" }]);
+  const remove = (i) => {
+    if (!confirm("Remove this exercise from the routine?")) return;
+    update(ex.filter((_, idx) => idx !== i));
+  };
+  const move = (i, dir) => {
+    const j = i + dir;
+    if (j < 0 || j >= ex.length) return;
+    const next = [...ex];
+    [next[i], next[j]] = [next[j], next[i]];
+    update(next);
+  };
+
+  if (routineKey === "rest") {
+    return <div style={{ fontSize: 13, color: "var(--text-dim)" }}>Rest day. No exercises needed.</div>;
+  }
+
+  if (ex.length === 0) {
+    return (
+      <div>
+        <EmptyState icon="list">No exercises yet</EmptyState>
+        <button className="btn btn-primary btn-block" onClick={add}>Add first exercise</button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {ex.map((item, i) => (
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: 8, alignItems: "center", padding: "9px 0", borderBottom: i === ex.length - 1 ? 0 : "1px solid var(--border)" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <button className="btn-ghost" style={{ background: "transparent", border: 0, padding: "0 4px", color: "var(--text-faint)", fontSize: 12 }} onClick={() => move(i, -1)} disabled={i === 0}>▲</button>
+            <button className="btn-ghost" style={{ background: "transparent", border: 0, padding: "0 4px", color: "var(--text-faint)", fontSize: 12 }} onClick={() => move(i, 1)} disabled={i === ex.length - 1}>▼</button>
+          </div>
+          <input
+            type="text"
+            value={item.exercise}
+            onChange={(e) => setItem(i, { exercise: e.target.value })}
+            style={{ background: "var(--surface-2)", padding: "8px 10px", fontSize: 13 }}
+          />
+          <select
+            value={item.muscle || "Other"}
+            onChange={(e) => setItem(i, { muscle: e.target.value })}
+            style={{ fontSize: 12, padding: "8px 6px", width: "auto" }}
+          >
+            {muscleList.map((mg) => <option key={mg} value={mg}>{mg}</option>)}
+          </select>
+          <button className="btn btn-small btn-danger" onClick={() => remove(i)}>×</button>
+        </div>
+      ))}
+      <button className="btn btn-block" style={{ marginTop: 10 }} onClick={add}>+ Add exercise</button>
+    </div>
+  );
+}
+
+function PlanTab({ store, showToast, goToWorkout }) {
+  const plan = store.state.plan;
+  const todayIso = todayISO();
+  const [month, setMonth] = useState(monthOf(todayIso));
+  const [selected, setSelected] = useState(todayIso);
+  const [editingRoutine, setEditingRoutine] = useState(null); // upper | lower | rest
+
+  const stepMonth = (dir) => {
+    const [y, m] = month.split("-").map(Number);
+    const d = new Date(y, m - 1 + dir, 1);
+    setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  };
+
+  const monthLabel = (() => {
+    const [y, m] = month.split("-").map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  })();
+
+  const selSplit = splitForDate(plan, selected);
+  const selRoutine = selSplit ? plan.routines[selSplit] : null;
+  const todaySplit = splitForDate(plan, todayIso);
+  const todayRoutine = todaySplit ? plan.routines[todaySplit] : null;
+
+  // Build "next 5 days" preview
+  const nextDays = lastNDays(5, addDays(todayIso, 4)).slice(0, 5);
+
+  const loadIntoWorkout = (date, routine) => {
+    if (!routine || !routine.exercises.length) {
+      showToast("No exercises in routine");
+      return;
+    }
+    const existing = store.state.workouts[date] || [];
+    if (existing.length > 0) {
+      if (!confirm("This day already has logged exercises. Replace with template?")) return;
+    }
+    const seeded = routine.exercises.map((e) => ({
+      exercise: e.exercise,
+      muscle: e.muscle || inferMuscle(e.exercise),
+      sets: [{ weight: 0, reps: 0, rpe: null }],
+    }));
+    store.setWorkout(date, seeded);
+    showToast("Template loaded");
+    goToWorkout(date);
+  };
+
+  return (
+    <div className="page">
+      {todaySplit ? (
+        <div className="card">
+          <div className="split-banner" style={{ margin: 0, border: 0, padding: 0, background: "transparent" }}>
+            <div className={"badge-lg " + todaySplit}>{todayRoutine?.name || todaySplit}</div>
+            <div className="text">
+              <div className="lbl">Today</div>
+              <div className="val">
+                {todaySplit === "rest"
+                  ? "Rest day"
+                  : `${todayRoutine?.exercises?.length || 0} exercises planned`}
+              </div>
+            </div>
+            {todaySplit !== "rest" && todayRoutine?.exercises?.length > 0 && (
+              <button className="btn btn-primary btn-small" onClick={() => loadIntoWorkout(todayIso, todayRoutine)}>
+                Load
+              </button>
+            )}
+          </div>
+        </div>
+      ) : plan.startDate && plan.startDate > todayIso ? (
+        <div className="card">
+          <div className="split-banner" style={{ margin: 0, border: 0, padding: 0, background: "transparent" }}>
+            <div className={"badge-lg " + plan.cycle[0]}>{plan.routines[plan.cycle[0]]?.name || plan.cycle[0]}</div>
+            <div className="text">
+              <div className="lbl">Plan starts</div>
+              <div className="val">
+                {formatDate(plan.startDate, { relative: true })} ({daysBetween(todayIso, plan.startDate)} day{daysBetween(todayIso, plan.startDate) === 1 ? "" : "s"})
+              </div>
+            </div>
+            <button className="btn btn-small" onClick={() => { setMonth(monthOf(plan.startDate)); setSelected(plan.startDate); }}>
+              View
+            </button>
+          </div>
+        </div>
+      ) : (
+        <Card title="Plan">
+          <div style={{ fontSize: 13, color: "var(--text-dim)" }}>
+            No active plan. Set a start date below.
+          </div>
+        </Card>
+      )}
+
+      <Card title="Up next">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
+          {nextDays.map((d) => {
+            const sp = splitForDate(plan, d);
+            const wd = weekdayShort(d);
+            const day = d.split("-")[2];
+            return (
+              <button
+                key={d}
+                onClick={() => { setMonth(monthOf(d)); setSelected(d); }}
+                style={{
+                  background: d === todayIso ? "var(--surface-3)" : "var(--surface-2)",
+                  border: "1px solid " + (d === todayIso ? "var(--accent)" : "var(--border)"),
+                  borderRadius: 8,
+                  padding: "8px 4px",
+                  textAlign: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ fontSize: 10, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{wd}</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", margin: "2px 0 4px" }}>{day}</div>
+                {sp && (
+                  <div className={"cal-pill " + sp} style={{ display: "inline-block" }}>
+                    {sp === "rest" ? "R" : sp[0].toUpperCase()}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card title={monthLabel} hint={
+        <span style={{ display: "flex", gap: 6 }}>
+          <button className="cal-nav-btn" onClick={() => stepMonth(-1)}>‹</button>
+          <button className="cal-nav-btn" onClick={() => stepMonth(1)}>›</button>
+        </span>
+      }>
+        <Calendar
+          plan={plan}
+          workouts={store.state.workouts}
+          monthIso={month}
+          selectedIso={selected}
+          todayIso={todayIso}
+          onSelect={setSelected}
+        />
+      </Card>
+
+      {selected && selSplit && (
+        <Card title={`${formatDate(selected, { relative: true })} — ${selRoutine?.name || selSplit}`}>
+          {selSplit === "rest" ? (
+            <div style={{ fontSize: 13, color: "var(--text-dim)" }}>Rest day. Recover and refuel.</div>
+          ) : (
+            <>
+              <div className="routine-list">
+                {(selRoutine?.exercises || []).map((e, i) => (
+                  <div className="routine-row" key={i}>
+                    <div className="num">{i + 1}</div>
+                    <div>
+                      <div className="name">{e.exercise}</div>
+                      <div className="muscle">{e.muscle || inferMuscle(e.exercise)}</div>
+                    </div>
+                    <div />
+                  </div>
+                ))}
+                {(!selRoutine?.exercises || selRoutine.exercises.length === 0) && (
+                  <EmptyState icon="list">No exercises in this routine yet</EmptyState>
+                )}
+              </div>
+              <div className="btn-row" style={{ marginTop: 12 }}>
+                <button className="btn btn-primary" onClick={() => loadIntoWorkout(selected, selRoutine)}>
+                  Load template into {formatDate(selected, { relative: true }).toLowerCase()}'s workout
+                </button>
+              </div>
+            </>
+          )}
+        </Card>
+      )}
+
+      <Card title="Edit routines" subtitle="Exercise list only — sets and weights are logged per session.">
+        <div className="btn-row" style={{ marginBottom: 12 }}>
+          {plan.cycle.map((k) => (
+            <button
+              key={k}
+              className={"btn btn-small " + (editingRoutine === k ? "btn-primary" : "")}
+              onClick={() => setEditingRoutine(editingRoutine === k ? null : k)}
+            >
+              {plan.routines[k]?.name || k}
+            </button>
+          ))}
+        </div>
+        {editingRoutine && (
+          <RoutineEditor
+            routineKey={editingRoutine}
+            routine={plan.routines[editingRoutine] || { name: editingRoutine, exercises: [] }}
+            onChange={(next) => store.setRoutine(editingRoutine, next)}
+          />
+        )}
+      </Card>
+
+      <Card title="Plan settings">
+        <div className="field-row">
+          <div className="field">
+            <label>Start date</label>
+            <input type="date" value={plan.startDate || ""} onChange={(e) => store.setPlan({ startDate: e.target.value })} />
+            <div className="field-hint">First day of {plan.routines[plan.cycle[0]]?.name || plan.cycle[0]}.</div>
+          </div>
+          <div className="field">
+            <label>Cycle</label>
+            <input
+              type="text"
+              value={plan.cycle.join(" → ")}
+              onChange={(e) => {
+                const parts = e.target.value.split(/[→,>\/\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+                if (parts.length) store.setPlan({ cycle: parts });
+              }}
+            />
+            <div className="field-hint">Order matters. Use existing routine keys.</div>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ==========================================================================
  * 9. DAILY INPUT TAB
  * ========================================================================== */
 
@@ -983,11 +1399,42 @@ function BodyTab({ store, showToast }) {
  * 11. WORKOUT TAB (with Hevy paste import)
  * ========================================================================== */
 
-function WorkoutTab({ store, showToast }) {
-  const [date, setDate] = useState(todayISO());
+function WorkoutTab({ store, showToast, initialDate, clearInitialDate }) {
+  const [date, setDate] = useState(initialDate || todayISO());
+  // If parent sends a new initialDate (e.g. from Plan tab), sync once.
+  useEffect(() => {
+    if (initialDate && initialDate !== date) {
+      setDate(initialDate);
+      clearInitialDate && clearInitialDate();
+    }
+    // eslint-disable-next-line
+  }, [initialDate]);
+
   const workout = store.state.workouts[date] || [];
   const [pasteText, setPasteText] = useState("");
   const [parseWarn, setParseWarn] = useState([]);
+
+  // Plan-aware: if this date matches a planned split and workout is empty, offer template.
+  const plan = store.state.plan;
+  const plannedSplit = splitForDate(plan, date);
+  const plannedRoutine = plannedSplit ? plan.routines[plannedSplit] : null;
+  const showTemplateBanner =
+    plannedSplit &&
+    plannedSplit !== "rest" &&
+    plannedRoutine &&
+    plannedRoutine.exercises &&
+    plannedRoutine.exercises.length > 0 &&
+    workout.length === 0;
+
+  const loadTemplate = () => {
+    const seeded = plannedRoutine.exercises.map((e) => ({
+      exercise: e.exercise,
+      muscle: e.muscle || inferMuscle(e.exercise),
+      sets: [{ weight: 0, reps: 0, rpe: null }],
+    }));
+    store.setWorkout(date, seeded);
+    showToast("Template loaded");
+  };
 
   const setExercises = (next) => store.setWorkout(date, next);
 
@@ -1048,6 +1495,22 @@ function WorkoutTab({ store, showToast }) {
     <div className="page">
       <Card title="Session" hint={formatDate(date, { relative: true })}>
         <DateNav date={date} onChange={setDate} />
+        {plannedSplit && (
+          <div className="split-banner" style={{ marginTop: 12, marginBottom: 0 }}>
+            <div className={"badge-lg " + plannedSplit}>{plannedRoutine?.name || plannedSplit}</div>
+            <div className="text">
+              <div className="lbl">Planned</div>
+              <div className="val">
+                {plannedSplit === "rest"
+                  ? "Rest day"
+                  : `${plannedRoutine?.exercises?.length || 0} exercises`}
+              </div>
+            </div>
+            {showTemplateBanner && (
+              <button className="btn btn-primary btn-small" onClick={loadTemplate}>Load</button>
+            )}
+          </div>
+        )}
         <div style={{ height: 12 }} />
         <div className="field-row">
           <NumInput
@@ -1772,9 +2235,16 @@ function App() {
   const store = useStore();
   const [showToast, toastNode] = useToast();
   const [tab, setTab] = useState("daily");
+  const [workoutInitialDate, setWorkoutInitialDate] = useState(null);
+
+  const goToWorkout = (date) => {
+    setWorkoutInitialDate(date);
+    setTab("workout");
+  };
 
   const tabs = [
     { id: "daily", label: "Today" },
+    { id: "plan", label: "Plan" },
     { id: "workout", label: "Workout" },
     { id: "body", label: "Body" },
     { id: "training", label: "Training" },
@@ -1807,7 +2277,15 @@ function App() {
       </nav>
 
       {tab === "daily" && <DailyTab store={store} showToast={showToast} />}
-      {tab === "workout" && <WorkoutTab store={store} showToast={showToast} />}
+      {tab === "plan" && <PlanTab store={store} showToast={showToast} goToWorkout={goToWorkout} />}
+      {tab === "workout" && (
+        <WorkoutTab
+          store={store}
+          showToast={showToast}
+          initialDate={workoutInitialDate}
+          clearInitialDate={() => setWorkoutInitialDate(null)}
+        />
+      )}
       {tab === "body" && <BodyTab store={store} showToast={showToast} />}
       {tab === "training" && <TrainingTab store={store} />}
       {tab === "recovery" && <RecoveryTab store={store} />}
